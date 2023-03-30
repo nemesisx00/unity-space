@@ -7,35 +7,52 @@ public class Player : MonoBehaviour
 	private float gravity = -9.8f;
 	private float gravAccel = 0;
 	private float speed = 1.0f;
-	private float jumpHeight = 1.0f;
+	private float gSpeed = 5.0f;
+	private float jumpHeight = 3.0f;
 	
 	private float turnSpeed = 1.0f;
+	private float gTurnSpeed = 5.0f;
 	private float rollSpeed = 0.1f;
+	private float vertMin = -90.0f;
+	private float vertMax = 90.0f;
 	
-	private bool zeroG = true;
+	private float horizontalRotation = 0;
+	private float verticalRotation = 0;
+	private bool zeroG = false;
 	private bool enableMagnet = true;
 	private float idleTime = 0;
 	
+	private CharacterController controller;
+	private CapsuleCollider rigidCollider;
 	private Rigidbody rigidBody;
+	private Vector3 rotationProxy;
 	
-	private void Start()
+	private void Awake()
 	{
+		controller = GetComponent<CharacterController>();
+		rigidCollider = GetComponent<CapsuleCollider>();
 		rigidBody = GetComponent<Rigidbody>();
-		toggleZeroG();
+		gravity = Physics.gravity.y;
+		
+		toggleZeroG(false);
 	}
 	
 	private void FixedUpdate()
 	{
-		if(Rotation != Vector3.zero)
-			rigidBody.AddRelativeTorque(Rotation, ForceMode.VelocityChange);
-		if(Movement != Vector3.zero)
-			rigidBody.AddRelativeForce(Movement * speed, ForceMode.VelocityChange);
-		
 		if(!zeroG)
 		{
-			var leveled = transform.eulerAngles;
-			leveled.z = Mathf.Round(leveled.z / 90) * 90;
-			transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(leveled), Time.deltaTime);
+			fullGravityRotation();
+			fullGravityMovement();
+		}
+		else
+		{
+			var rotation = Rotation;
+			var movement = Movement;
+			
+			if(rotation != Vector3.zero)
+				rigidBody.AddRelativeTorque(rotation, ForceMode.VelocityChange);
+			if(Movement != Vector3.zero)
+				rigidBody.AddRelativeForce(movement * speed, ForceMode.VelocityChange);
 		}
 	}
 	
@@ -45,9 +62,7 @@ public class Player : MonoBehaviour
 			toggleZeroG();
 		
 		if(zeroG)
-		{
 			magnetToRightAngle();
-		}
 	}
 	
 	private Vector3 Movement
@@ -71,12 +86,42 @@ public class Player : MonoBehaviour
 			{
 				x = Input.GetAxis("LookVertical") * -turnSpeed,
 				y = Input.GetAxis("LookHorizontal") * turnSpeed,
-				z = zeroG ? Input.GetAxis("LookLateral") * rollSpeed : 0
+				z = Input.GetAxis("LookLateral") * rollSpeed
 			};
 			
 			enableMagnet = zeroG && rotation.magnitude <= 0.4f && rotation.z == 0;
 			return rotation;
 		}
+	}
+	
+	private void fullGravityMovement()
+	{
+		var moveDirection = controller.transform.TransformDirection(
+			new Vector3(
+				Input.GetAxis("MoveLateral") * gSpeed,
+				0,
+				Input.GetAxis("MoveHorizontal") * gSpeed
+			)
+		);
+		
+		if(controller.isGrounded)
+			gravAccel = 0;
+		if(Input.GetButtonDown("Jump") && controller.isGrounded)
+			gravAccel += Mathf.Sqrt(jumpHeight * -gravity);
+		gravAccel += gravity * Time.deltaTime;
+		
+		moveDirection.y = gravAccel;
+		if(moveDirection != Vector3.zero)
+			controller.Move(moveDirection * Time.deltaTime);
+	}
+	
+	private void fullGravityRotation()
+	{
+		horizontalRotation += Input.GetAxis("LookHorizontal") * gTurnSpeed;
+		verticalRotation += Input.GetAxis("LookVertical") * gTurnSpeed;
+		verticalRotation = Mathf.Clamp(verticalRotation, vertMin, vertMax);
+		
+		controller.transform.rotation = Quaternion.Slerp(controller.transform.rotation, Quaternion.Euler(-verticalRotation, horizontalRotation, 0), Time.deltaTime * gSpeed);
 	}
 	
 	private void magnetToRightAngle()
@@ -96,101 +141,11 @@ public class Player : MonoBehaviour
 			idleTime = 0;
 	}
 	
-	private void toggleZeroG()
+	private void toggleZeroG(bool? force = null)
 	{
-		zeroG = !zeroG;
+		zeroG = force != null ? (bool)force : !zeroG;
 		
-		if(zeroG)
-		{
-			rigidBody.constraints = RigidbodyConstraints.None;
-			rigidBody.useGravity = false;
-		}
-		else
-		{
-			rigidBody.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-			rigidBody.useGravity = true;
-		}
+		controller.enabled = !zeroG;
+		rigidCollider.enabled = zeroG;
 	}
-	
-	//CharacterController version
-	/*
-	private CharacterController controller;
-	
-	private void Start()
-	{
-		controller = GetComponent<CharacterController>();
-		gravity = Physics.gravity.y;
-	}
-	
-	private void Update()
-	{
-		if(Input.GetButtonDown("ToggleGravity"))
-			zeroG = !zeroG;
-		
-		if(zeroG)
-		{
-			zeroGravityRotation();
-			zeroGravityMovement();
-		}
-		else
-		{
-			fullGravityRotation();
-			fullGravityMovement();
-		}
-	}
-	
-	private void fullGravityMovement()
-	{
-		var moveDirection = controller.transform.TransformDirection(
-			new Vector3(
-				Input.GetAxis("MoveLateral") * speed,
-				0,
-				Input.GetAxis("MoveHorizontal") * speed
-			)
-		);
-		
-		if(controller.isGrounded)
-			gravAccel = 0;
-		if(Input.GetButtonDown("Jump") && controller.isGrounded)
-			gravAccel += Mathf.Sqrt(jumpHeight * -3.0f * gravity);
-		gravAccel += gravity * Time.deltaTime;
-		
-		moveDirection.y = gravAccel;
-		if(moveDirection != Vector3.zero)
-			controller.Move(moveDirection * Time.deltaTime);
-	}
-	
-	private void fullGravityRotation()
-	{
-		float horizontalRotation = Input.GetAxis("LookHorizontal") * turnSpeed;
-		horizontalRotation += controller.transform.eulerAngles.y;
-		verticalRotation += Input.GetAxis("LookVertical") * turnSpeed;
-		verticalRotation = Mathf.Clamp(verticalRotation, verticalMinimum, verticalMaximum);
-		
-		controller.transform.eulerAngles = new Vector3(-verticalRotation, horizontalRotation, 0);
-	}
-	
-	private void zeroGravityMovement()
-	{
-		var moveDirection = controller.transform.TransformDirection(
-			new Vector3(
-				Input.GetAxis("MoveLateral"),
-				Input.GetAxis("MoveVertical"),
-				Input.GetAxis("MoveHorizontal")
-			)
-		);
-		
-		if(moveDirection != Vector3.zero)
-			controller.Move(moveDirection * Time.deltaTime * speed);
-	}
-	
-	private void zeroGravityRotation()
-	{
-		lateralRotation += Input.GetAxis("LookLateral") * rollSpeed;
-		float horizontalRotation = Input.GetAxis("LookHorizontal") * turnSpeed;
-		horizontalRotation += controller.transform.eulerAngles.y;
-		verticalRotation += Input.GetAxis("LookVertical") * turnSpeed;
-		controller.transform.eulerAngles = new Vector3(-verticalRotation, horizontalRotation, lateralRotation);
-	}
-	*/
 }
