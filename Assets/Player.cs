@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+[RequireComponent(typeof(Rigidbody))]
 public class Player : MonoBehaviour
 {
 	private enum InputNames
@@ -16,18 +17,30 @@ public class Player : MonoBehaviour
 		ToggleGravity,
 	}
 	
-	private float gravity = -9.8f;
+	[Header("Kinematic")]
+	[SerializeField]
+	private float kinematicSpeed = 5.0f;
+	[SerializeField]
+	private float kinematicTurnSpeed = 5.0f;
+	
+	[Header("Movement")]
+	[SerializeField]
 	private float speed = 1.0f;
+	[SerializeField]
 	private float jumpHeight = 3.0f;
 	
+	[Header("Rotation")]
+	[SerializeField]
 	private float turnSpeed = 1.0f;
+	[SerializeField]
 	private float rollSpeed = 0.1f;
+	[SerializeField]
 	private float vertMin = -90.0f;
+	[SerializeField]
 	private float vertMax = 90.0f;
 	
+	private float gravity = -9.8f;
 	private bool zeroG = false;
-	private bool enableMagnet = true;
-	private float idleTime = 0;
 	private float gravAccel = 0;
 	
 	private CapsuleCollider capsuleCollider;
@@ -51,28 +64,20 @@ public class Player : MonoBehaviour
 		}
 	}
 	
-	private Vector3 Movement
+	private Vector3 FreeMovement
 	{
 		get
 		{
-			var up = Input.GetAxis(InputNames.MoveVertical.ToString());
-			if(!zeroG)
-			{
-				up = 0;
-				if(Input.GetButtonDown(InputNames.Jump.ToString()))
-					up += Mathf.Sqrt(jumpHeight * -gravity);
-			}
-			
 			return new Vector3
 			{
 				x = Input.GetAxis(InputNames.MoveLateral.ToString()),
-				y = up,
+				y = Input.GetAxis(InputNames.MoveVertical.ToString()),
 				z = Input.GetAxis(InputNames.MoveHorizontal.ToString())
 			};
 		}
 	}
 	
-	private Vector3 Rotation
+	private Vector3 FreeRotation
 	{
 		get
 		{
@@ -80,10 +85,9 @@ public class Player : MonoBehaviour
 			{
 				x = Input.GetAxis(InputNames.LookVertical.ToString()) * -turnSpeed,
 				y = Input.GetAxis(InputNames.LookHorizontal.ToString()) * turnSpeed,
-				z = zeroG ? Input.GetAxis(InputNames.LookLateral.ToString()) * rollSpeed : 0
+				z = Input.GetAxis(InputNames.LookLateral.ToString()) * rollSpeed
 			};
 			
-			enableMagnet = rot.magnitude <= 0.4f && rot.z == 0;
 			return rot;
 		}
 	}
@@ -101,19 +105,15 @@ public class Player : MonoBehaviour
 	
 	private void FixedUpdate()
 	{
-		
-		
 		if(zeroG)
 		{
-			rigidBody.AddRelativeTorque(Rotation, ForceMode.VelocityChange);
-			rigidBody.AddRelativeForce(Movement * speed, ForceMode.VelocityChange);
-			magnetToRightAngle();
+			rigidBody.AddRelativeTorque(FreeRotation, ForceMode.VelocityChange);
+			rigidBody.AddRelativeForce(FreeMovement * speed, ForceMode.VelocityChange);
 		}
 		else
 		{
 			kinematicRotation();
 			kinematicMovement();
-			forceUpright();
 		}
 	}
 	
@@ -123,24 +123,13 @@ public class Player : MonoBehaviour
 			toggleZeroG();
 	}
 	
-	private void forceUpright()
-	{
-		var rot = transform.eulerAngles;
-		
-		if(!Mathf.Approximately(rot.z, 0.0f))
-		{
-			rot.z = 0;
-			transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(rot), Time.deltaTime * turnSpeed);
-		}
-	}
-	
 	private void kinematicMovement()
 	{
-		var moveDirection = transform.TransformDirection(
+		var moveDirection = rigidBody.transform.TransformDirection(
 			new Vector3(
-				Input.GetAxis(InputNames.MoveLateral.ToString()) * speed,
+				Input.GetAxis(InputNames.MoveLateral.ToString()) * kinematicSpeed,
 				0,
-				Input.GetAxis(InputNames.MoveHorizontal.ToString()) * speed
+				Input.GetAxis(InputNames.MoveHorizontal.ToString()) * kinematicSpeed
 			)
 		);
 		
@@ -151,47 +140,28 @@ public class Player : MonoBehaviour
 		
 		if(OnGround)
 		{
-			//gravAccel = 0;
+			gravAccel = 0;
 			if(Input.GetButtonDown("Jump"))
 				gravAccel += Mathf.Sqrt(jumpHeight * -gravity);
 		}
-		gravAccel += gravity * Time.deltaTime;
+		else
+			gravAccel += gravity * Time.fixedDeltaTime;
 		
 		moveDirection.y = gravAccel;
-		transform.position = Vector3.Slerp(transform.position, moveDirection, Time.deltaTime * speed);
+		rigidBody.MovePosition(rigidBody.position + moveDirection * Time.fixedDeltaTime);
 	}
 	
 	private void kinematicRotation()
 	{
-		var hRot = Input.GetAxis("LookHorizontal") * turnSpeed;
-		var vRot = Input.GetAxis("LookVertical") * -turnSpeed;
-		
-		transform.rotation = Quaternion.Slerp(
-			transform.rotation,
-			Quaternion.Euler(
-				transform.rotation.x + vRot,
-				Mathf.Clamp(transform.rotation.y + hRot, vertMin, vertMax),
-				0
-			),
-			Time.deltaTime * turnSpeed
-		);
-	}
-	
-	private void magnetToRightAngle()
-	{
-		if(enableMagnet)
+		var angles = rigidBody.transform.eulerAngles;
+		var desired = new Vector3
 		{
-			if(idleTime > 1)
-			{
-				var roundedRotation = transform.eulerAngles;
-				roundedRotation.z = Mathf.Round(roundedRotation.z / 90) * 90;
-				transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(roundedRotation), Time.deltaTime);
-			}
-			else
-				idleTime += Time.deltaTime;
-		}
-		else
-			idleTime = 0;
+			x = angles.x - Input.GetAxis(InputNames.LookVertical.ToString()) * kinematicTurnSpeed,
+			y = angles.y + Input.GetAxis(InputNames.LookHorizontal.ToString()) * kinematicTurnSpeed,
+			z = 0
+		};
+		
+		rigidBody.MoveRotation(Quaternion.Euler(desired));
 	}
 	
 	private void toggleZeroG(bool? force = null)
@@ -199,11 +169,5 @@ public class Player : MonoBehaviour
 		zeroG = force != null ? (bool)force : !zeroG;
 		
 		rigidBody.isKinematic = !zeroG;
-		/*
-		if(zeroG)
-			rigidBody.constraints = RigidbodyConstraints.None;
-		else
-			rigidBody.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-		*/
 	}
 }
